@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>EPUB 字数统计器</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+<style>
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+}
+
+body{
+    font-family:"Microsoft YaHei",sans-serif;
+    background:#eef2f7;
+    color:#222;
+    padding:30px;
+}
+
+.container{
+    max-width:1100px;
+    margin:auto;
+}
+
+h1{
+    text-align:center;
+    margin-bottom:25px;
+}
+
+.drop{
+    border:3px dashed #4b89ff;
+    border-radius:15px;
+    background:white;
+    padding:60px;
+    text-align:center;
+    transition:.3s;
+    cursor:pointer;
+}
+
+.drop.drag{
+    background:#e8f0ff;
+}
+
+input[type=file]{
+    display:none;
+}
+
+button{
+    padding:10px 25px;
+    border:none;
+    background:#4b89ff;
+    color:white;
+    border-radius:8px;
+    cursor:pointer;
+    margin-top:15px;
+}
+
+button:hover{
+    background:#2563eb;
+}
+
+.card{
+    margin-top:25px;
+    background:white;
+    border-radius:15px;
+    padding:20px;
+    box-shadow:0 5px 15px rgba(0,0,0,.08);
+}
+
+.grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+    gap:15px;
+}
+
+.item{
+    background:#f7f9fc;
+    padding:15px;
+    border-radius:10px;
+}
+
+.item h3{
+    font-size:15px;
+    color:#666;
+    margin-bottom:8px;
+}
+
+.item p{
+    font-size:24px;
+    font-weight:bold;
+}
+
+#cover{
+    width:160px;
+    display:none;
+    border-radius:10px;
+    margin-bottom:15px;
+}
+
+table{
+    width:100%;
+    border-collapse:collapse;
+    margin-top:20px;
+}
+
+th,td{
+    border-bottom:1px solid #eee;
+    padding:10px;
+}
+
+th{
+    background:#f3f5fa;
+}
+
+canvas{
+    width:100%;
+    height:400px;
+    margin-top:20px;
+    border:1px solid #ddd;
+    border-radius:10px;
+}
+
+.toolbar{
+    margin-top:20px;
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+}
+
+.dark{
+    background:#16181d;
+    color:white;
+}
+
+.dark .card{
+    background:#242831;
+}
+
+.dark .item{
+    background:#2f3440;
+}
+
+.dark table{
+    color:white;
+}
+
+.dark th{
+    background:#353b49;
+}
+
+.dark canvas{
+    border:1px solid #555;
+}
+
+.footer{
+    text-align:center;
+    margin-top:25px;
+    color:#888;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<h1>📚 EPUB 字数统计器</h1>
+
+<div class="drop" id="drop">
+
+<h2>拖拽 EPUB 到这里</h2>
+
+<p style="margin:15px 0;">或者</p>
+
+<button onclick="file.click()">选择EPUB</button>
+
+<input id="file" type="file" accept=".epub">
+
+</div>
+
+<div class="toolbar">
+
+<button onclick="toggleDark()">🌙 深色模式</button>
+
+<button onclick="exportCSV()">导出CSV</button>
+
+<button onclick="exportTXT()">导出TXT</button>
+
+<button onclick="exportJSON()">导出JSON</button>
+
+</div>
+
+<div class="card">
+
+<img id="cover">
+
+<h2 id="title">书名：</h2>
+
+<p id="author">作者：</p>
+
+</div>
+
+<div class="card">
+
+<div class="grid">
+
+<div class="item">
+<h3>总中文字数</h3>
+<p id="cn">0</p>
+</div>
+
+<div class="item">
+<h3>英文单词</h3>
+<p id="en">0</p>
+</div>
+
+<div class="item">
+<h3>字符数</h3>
+<p id="chars">0</p>
+</div>
+
+<div class="item">
+<h3>字符数(无空格)</h3>
+<p id="chars2">0</p>
+</div>
+
+<div class="item">
+<h3>章节数</h3>
+<p id="chapters">0</p>
+</div>
+
+<div class="item">
+<h3>阅读时间</h3>
+<p id="time">0分钟</p>
+</div>
+
+</div>
+
+</div>
+
+<div class="card">
+
+<h2>章节统计</h2>
+
+<table>
+
+<thead>
+
+<tr>
+
+<th>章节</th>
+
+<th>中文字数</th>
+
+<th>英文单词</th>
+
+</tr>
+
+</thead>
+
+<tbody id="tbody">
+
+</tbody>
+
+</table>
+
+<canvas id="chart" width="1000" height="400"></canvas>
+
+</div>
+
+<div class="footer">
+
+EPUB Counter | GitHub Pages
+
+</div>
+
+</div>
+
+<script>
+
+const drop=document.getElementById("drop");
+
+const file=document.getElementById("file");
+
+let result=[];
+
+drop.onclick=()=>file.click();
+
+drop.addEventListener("dragover",e=>{
+e.preventDefault();
+drop.classList.add("drag");
+});
+
+drop.addEventListener("dragleave",()=>{
+drop.classList.remove("drag");
+});
+
+drop.addEventListener("drop",e=>{
+e.preventDefault();
+drop.classList.remove("drag");
+handleFile(e.dataTransfer.files[0]);
+});
+
+file.onchange=e=>{
+handleFile(e.target.files[0]);
+};
+
+function toggleDark(){
+
+document.body.classList.toggle("dark");
+
+}
+
+async function handleFile(f){
+
+if(!f)return;
+
+if(!f.name.endsWith(".epub")){
+
+alert("请选择EPUB文件");
+
+return;
+
+}
+
+const zip=await JSZip.loadAsync(f);
+
+const files=Object.keys(zip.files);
+
+let htmlFiles=[];
+
+for(const x of files){
+
+const s=x.toLowerCase();
+
+if(
+s.endsWith(".xhtml")||
+s.endsWith(".html")||
+s.endsWith(".htm")
+){
+
+htmlFiles.push(x);
+
+}
+
+}
+
+result=[];
+
+let totalCN=0;
+
+let totalEN=0;
+
+let totalChars=0;
+
+let totalChars2=0;
+
+for(const h of htmlFiles){
+
+let text=await zip.file(h).async("string");
+
+text=text.replace(/<script[\s\S]*?<\/script>/gi,"");
+
+text=text.replace(/<style[\s\S]*?<\/style>/gi,"");
+
+const doc=new DOMParser().parseFromString(text,"text/html");
+
+let body=doc.body?doc.body.innerText:"";
+
+body=body.replace(/\r/g,"");
+
+body=body.replace(/\n+/g,"\n");
+
+const cn=(body.match(/[\u4e00-\u9fa5]/g)||[]).length;
+
+const en=(body.match(/[A-Za-z]+/g)||[]).length;
+
+const chars=body.length;
+
+const chars2=body.replace(/\s/g,"").length;
+
+totalCN+=cn;
+
+totalEN+=en;
+
+totalChars+=chars;
+
+totalChars2+=chars2;
+
+result.push({
+
+chapter:h.split("/").pop(),
+
+cn,
+
+en,
+
+chars,
+
+text:body
+
+});
+
+}
+const tbody = document.getElementById("tbody");
+tbody.innerHTML = "";
+
+result.forEach(item => {
+
+    const tr = document.createElement("tr");
+
+    tr.innerHTML = `
+        <td>${item.chapter}</td>
+        <td>${item.cn.toLocaleString()}</td>
+        <td>${item.en.toLocaleString()}</td>
+    `;
+
+    tbody.appendChild(tr);
+
+});
+
+document.getElementById("cn").textContent =
+    totalCN.toLocaleString();
+
+document.getElementById("en").textContent =
+    totalEN.toLocaleString();
+
+document.getElementById("chars").textContent =
+    totalChars.toLocaleString();
+
+document.getElementById("chars2").textContent =
+    totalChars2.toLocaleString();
+
+document.getElementById("chapters").textContent =
+    result.length;
+
+const minute = Math.max(1, Math.round(totalCN / 300));
+
+if(minute < 60){
+
+    document.getElementById("time").textContent =
+        minute + " 分钟";
+
+}else{
+
+    const h = Math.floor(minute / 60);
+    const m = minute % 60;
+
+    document.getElementById("time").textContent =
+        h + "小时" + m + "分钟";
+
+}
+
+drawChart();
+
+await readMetadata(zip);
+
+}
+
+async function readMetadata(zip){
+
+    const files = Object.keys(zip.files);
+
+    let opf = "";
+
+    for(const f of files){
+
+        if(f.toLowerCase().endsWith(".opf")){
+
+            opf = f;
+
+            break;
+
+        }
+
+    }
+
+    if(!opf)return;
+
+    const xml =
+        await zip.file(opf).async("string");
+
+    const doc =
+        new DOMParser().parseFromString(
+            xml,
+            "text/xml"
+        );
+
+    const title =
+        doc.getElementsByTagName("dc:title")[0];
+
+    if(title){
+
+        document.getElementById("title").innerHTML =
+            "书名：" + title.textContent;
+
+    }
+
+    const creator =
+        doc.getElementsByTagName("dc:creator")[0];
+
+    if(creator){
+
+        document.getElementById("author").innerHTML =
+            "作者：" + creator.textContent;
+
+    }
+
+    let coverId = "";
+
+    const metas =
+        doc.getElementsByTagName("meta");
+
+    for(let i=0;i<metas.length;i++){
+
+        if(metas[i].getAttribute("name")=="cover"){
+
+            coverId =
+                metas[i].getAttribute("content");
+
+        }
+
+    }
+
+    if(coverId){
+
+        const items =
+            doc.getElementsByTagName("item");
+
+        let href = "";
+
+        for(let i=0;i<items.length;i++){
+
+            if(items[i].getAttribute("id")==coverId){
+
+                href =
+                    items[i].getAttribute("href");
+
+            }
+
+        }
+
+        if(href){
+
+            const folder =
+                opf.substring(
+                    0,
+                    opf.lastIndexOf("/") + 1
+                );
+
+            const path = folder + href;
+
+            const img =
+                await zip.file(path)
+                ?.async("blob");
+
+            if(img){
+
+                const url =
+                    URL.createObjectURL(img);
+
+                const cover =
+                    document.getElementById("cover");
+
+                cover.src = url;
+
+                cover.style.display = "block";
+
+            }
+
+        }
+
+    }
+
+}
+
+function drawChart(){
+
+    const canvas =
+        document.getElementById("chart");
+
+    const ctx =
+        canvas.getContext("2d");
+
+    ctx.clearRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
+
+    if(result.length==0)return;
+
+    const max =
+        Math.max(...result.map(i=>i.cn));
+
+    const barWidth =
+        canvas.width/result.length;
+
+    result.forEach((r,index)=>{
+
+        const h =
+            r.cn/max*320;
+
+        const x =
+            index*barWidth+5;
+
+        const y =
+            360-h;
+
+        ctx.fillStyle="#4b89ff";
+
+        ctx.fillRect(
+            x,
+            y,
+            barWidth-10,
+            h
+        );
+
+        ctx.fillStyle="#333";
+
+        ctx.font="12px Arial";
+
+        ctx.save();
+
+        ctx.translate(
+            x+barWidth/2,
+            380
+        );
+
+        ctx.rotate(-Math.PI/4);
+
+        ctx.fillText(
+            r.chapter,
+            0,
+            0
+        );
+
+        ctx.restore();
+
+    });
+
+}
+function download(filename, content, type) {
+
+    const blob = new Blob([content], { type });
+
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+
+    a.href = url;
+    a.download = filename;
+
+    document.body.appendChild(a);
+
+    a.click();
+
+    a.remove();
+
+    URL.revokeObjectURL(url);
+
+}
+
+function exportCSV() {
+
+    if(result.length===0){
+
+        alert("请先打开EPUB文件");
+
+        return;
+
+    }
+
+    let csv = "章节,中文字数,英文单词,字符数\r\n";
+
+    result.forEach(r=>{
+
+        csv += `"${r.chapter}",${r.cn},${r.en},${r.chars}\r\n`;
+
+    });
+
+    download(
+
+        "epub统计.csv",
+
+        "\ufeff"+csv,
+
+        "text/csv;charset=utf-8"
+
+    );
+
+}
+
+function exportTXT(){
+
+    if(result.length===0){
+
+        alert("请先打开EPUB文件");
+
+        return;
+
+    }
+
+    let txt = "";
+
+    txt += "EPUB统计报告\r\n\r\n";
+
+    txt += document.getElementById("title").innerText + "\r\n";
+
+    txt += document.getElementById("author").innerText + "\r\n\r\n";
+
+    txt += "章节数：" +
+
+        result.length +
+
+        "\r\n";
+
+    txt += "总中文字数：" +
+
+        document.getElementById("cn").innerText +
+
+        "\r\n";
+
+    txt += "英文单词：" +
+
+        document.getElementById("en").innerText +
+
+        "\r\n";
+
+    txt += "字符数：" +
+
+        document.getElementById("chars").innerText +
+
+        "\r\n\r\n";
+
+    txt += "-----------------------------\r\n";
+
+    result.forEach(r=>{
+
+        txt +=
+
+            r.chapter +
+
+            "    中文：" +
+
+            r.cn +
+
+            "    英文：" +
+
+            r.en +
+
+            "\r\n";
+
+    });
+
+    download(
+
+        "epub统计.txt",
+
+        txt,
+
+        "text/plain"
+
+    );
+
+}
+
+function exportJSON(){
+
+    if(result.length===0){
+
+        alert("请先打开EPUB文件");
+
+        return;
+
+    }
+
+    const json = {
+
+        title:
+
+            document.getElementById("title").innerText,
+
+        author:
+
+            document.getElementById("author").innerText,
+
+        totalChinese:
+
+            Number(
+
+                document.getElementById("cn")
+
+                .innerText.replace(/,/g,"")
+
+            ),
+
+        totalEnglish:
+
+            Number(
+
+                document.getElementById("en")
+
+                .innerText.replace(/,/g,"")
+
+            ),
+
+        totalChars:
+
+            Number(
+
+                document.getElementById("chars")
+
+                .innerText.replace(/,/g,"")
+
+            ),
+
+        chapters:result
+
+    };
+
+    download(
+
+        "epub统计.json",
+
+        JSON.stringify(json,null,4),
+
+        "application/json"
+
+    );
+
+}
+
+</script>
+
+</body>
+
+</html>
